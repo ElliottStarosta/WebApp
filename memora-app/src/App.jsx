@@ -1,4 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { AuthProvider } from './context/AuthContext';
+import { GroupProvider } from './context/GroupContext';
+import { useAuth } from './context/AuthContext';
+import { useGroup } from './context/GroupContext';
+import AuthLayout from './components/auth/AuthLayout';
 import Header from './components/shared/Header';
 import DailyPrompt from './components/shared/DailyPrompt';
 import Navigation from './components/shared/Navigation';
@@ -7,121 +12,34 @@ import ActivityFeed from './components/shared/ActivityFeed';
 import Timeline from './components/timeline/Timeline';
 import RandomMemory from './components/timeline/RandomMemory';
 import StatsView from './components/stats/StatsView';
-import { MOCK_USERS, SAMPLE_POSTS, SAMPLE_ACTIVITIES } from './data/mockData';
+import GroupSelector from './components/groups/GroupSelector';
+import { usePosts } from './hooks/usePosts';
+import { useNotifications } from './hooks/useNotifications';
 import './styles/globals.css';
 
-function App() {
-  const [currentUser] = useState(MOCK_USERS[0]);
+function AppContent() {
+  const { currentUser, userProfile } = useAuth();
+  const { activeGroup, userGroups } = useGroup();
+  const { posts, addReaction, addComment, toggleFavorite, voteInPoll } = usePosts(
+    activeGroup?.id
+  );
+  const { notifications } = useNotifications(currentUser?.uid);
+
   const [activeView, setActiveView] = useState('timeline');
-  const [posts, setPosts] = useState([]);
-  const [showNewPost, setShowNewPost] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterBy, setFilterBy] = useState('all');
   const [randomMemory, setRandomMemory] = useState(null);
   const [showPrompt, setShowPrompt] = useState(true);
-  const [groupStats, setGroupStats] = useState({
-    totalPosts: 0,
-    streak: 7,
-    topContributor: MOCK_USERS[1],
-  });
 
   const dailyPrompt = "Share your favorite meal from this week! 🍽️";
 
-  // Initialize with sample posts
-  useEffect(() => {
-    setPosts(SAMPLE_POSTS);
-    setGroupStats({ ...groupStats, totalPosts: SAMPLE_POSTS.length });
-  }, []);
-
-  // Add reaction to a post
-  const addReaction = (postId, emoji) => {
-    setPosts(
-      posts.map((post) => {
-        if (post.id === postId) {
-          const reactions = { ...post.reactions };
-          if (!reactions[emoji]) reactions[emoji] = [];
-
-          if (reactions[emoji].includes(currentUser.id)) {
-            reactions[emoji] = reactions[emoji].filter((id) => id !== currentUser.id);
-          } else {
-            reactions[emoji].push(currentUser.id);
-          }
-
-          return { ...post, reactions };
-        }
-        return post;
-      })
-    );
-  };
-
-  // Add comment to a post
-  const addComment = (postId, text) => {
-    setPosts(
-      posts.map((post) => {
-        if (post.id === postId) {
-          return {
-            ...post,
-            comments: [
-              ...post.comments,
-              {
-                id: Date.now(),
-                author: currentUser,
-                text,
-                date: new Date(),
-              },
-            ],
-          };
-        }
-        return post;
-      })
-    );
-  };
-
-  // Toggle favorite on a post
-  const toggleFavorite = (postId) => {
-    setPosts(
-      posts.map((post) => {
-        if (post.id === postId) {
-          const favorites = post.favorites || [];
-          return {
-            ...post,
-            favorites: favorites.includes(currentUser.id)
-              ? favorites.filter((id) => id !== currentUser.id)
-              : [...favorites, currentUser.id],
-          };
-        }
-        return post;
-      })
-    );
-  };
-
-  // Vote in a poll
-  const voteInPoll = (postId, optionId) => {
-    setPosts(
-      posts.map((post) => {
-        if (post.id === postId && post.poll) {
-          const options = post.poll.options.map((opt) => ({
-            ...opt,
-            votes: opt.votes.filter((id) => id !== currentUser.id),
-          }));
-
-          const selectedOption = options.find((opt) => opt.id === optionId);
-          if (selectedOption) {
-            selectedOption.votes.push(currentUser.id);
-          }
-
-          return { ...post, poll: { ...post.poll, options } };
-        }
-        return post;
-      })
-    );
-  };
-
   // Get random memory
   const getRandomMemory = () => {
-    const randomPost = posts[Math.floor(Math.random() * posts.length)];
-    setRandomMemory(randomPost);
-    setActiveView('random');
+    if (posts.length > 0) {
+      const randomPost = posts[Math.floor(Math.random() * posts.length)];
+      setRandomMemory(randomPost);
+      setActiveView('random');
+    }
   };
 
   // Filter posts
@@ -131,7 +49,7 @@ function App() {
         return post.content.toLowerCase().includes(searchQuery.toLowerCase());
       }
       if (filterBy === 'favorites') {
-        return post.favorites?.includes(currentUser.id);
+        return post.favorites?.includes(currentUser?.uid);
       }
       if (filterBy === 'photos') {
         return post.type === 'photo';
@@ -140,13 +58,42 @@ function App() {
     })
     .sort((a, b) => b.date - a.date);
 
+  const groupStats = {
+    totalPosts: posts.length,
+    streak: 7,
+    topContributor: userProfile,
+  };
+
+  // Show group selector if no active group
+  if (!activeGroup && userGroups.length === 0) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-3xl shadow-2xl p-8 text-center max-w-md">
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">Welcome to Memora!</h2>
+          <p className="text-gray-600 mb-6">
+            Create your first group to start sharing memories with friends and family.
+          </p>
+          <GroupSelector />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50">
       {/* Header */}
-      <Header groupStats={groupStats} users={MOCK_USERS} />
+      <Header
+        groupStats={groupStats}
+        users={activeGroup?.members || []}
+        userProfile={userProfile}
+      />
 
       {/* Daily Prompt */}
-      <DailyPrompt prompt={dailyPrompt} show={showPrompt} onDismiss={() => setShowPrompt(false)} />
+      <DailyPrompt
+        prompt={dailyPrompt}
+        show={showPrompt}
+        onDismiss={() => setShowPrompt(false)}
+      />
 
       {/* Navigation */}
       <Navigation
@@ -170,34 +117,55 @@ function App() {
         {activeView === 'timeline' && (
           <Timeline
             posts={filteredPosts}
-            currentUser={currentUser}
-            onReact={addReaction}
-            onComment={addComment}
-            onFavorite={toggleFavorite}
-            onVote={voteInPoll}
-            onNewPost={() => setShowNewPost(!showNewPost)}
+            currentUser={userProfile}
+            onReact={(postId, emoji) => addReaction(postId, emoji, currentUser.uid)}
+            onComment={(postId, text) => addComment(postId, currentUser.uid, text)}
+            onFavorite={(postId) => toggleFavorite(postId, currentUser.uid)}
+            onVote={(postId, optionId) => voteInPoll(postId, optionId, currentUser.uid)}
           />
         )}
 
-        {activeView === 'random' && (
+        {activeView === 'random' && randomMemory && (
           <RandomMemory
             post={randomMemory}
-            currentUser={currentUser}
-            onReact={addReaction}
-            onComment={addComment}
-            onFavorite={toggleFavorite}
-            onVote={voteInPoll}
+            currentUser={userProfile}
+            onReact={(postId, emoji) => addReaction(postId, emoji, currentUser.uid)}
+            onComment={(postId, text) => addComment(postId, currentUser.uid, text)}
+            onFavorite={(postId) => toggleFavorite(postId, currentUser.uid)}
+            onVote={(postId, optionId) => voteInPoll(postId, optionId, currentUser.uid)}
             onRefresh={getRandomMemory}
           />
         )}
 
-        {activeView === 'stats' && <StatsView users={MOCK_USERS} posts={posts} />}
+        {activeView === 'stats' && (
+          <StatsView users={activeGroup?.members || []} posts={posts} />
+        )}
       </main>
 
       {/* Floating Activity Feed */}
-      <ActivityFeed activities={SAMPLE_ACTIVITIES} />
+      <ActivityFeed activities={notifications.slice(0, 10)} />
     </div>
   );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <GroupProvider>
+        <AuthChecker />
+      </GroupProvider>
+    </AuthProvider>
+  );
+}
+
+function AuthChecker() {
+  const { currentUser } = useAuth();
+
+  if (!currentUser) {
+    return <AuthLayout />;
+  }
+
+  return <AppContent />;
 }
 
 export default App;
