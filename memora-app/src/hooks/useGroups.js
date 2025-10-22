@@ -10,12 +10,45 @@ import {
   where,
   getDocs,
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../config/firebase';
+import { db } from '../config/firebase';
 
 export function useGroups() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  // Upload to Cloudinary using environment variables
+  const uploadToCloudinary = async (file) => {
+    const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+    const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+
+    if (!cloudName || !uploadPreset) {
+      throw new Error('Cloudinary configuration is missing. Please check your .env file.');
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('upload_preset', uploadPreset);
+
+    try {
+      const response = await fetch(
+        `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+        {
+          method: 'POST',
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to upload image to Cloudinary');
+      }
+
+      const data = await response.json();
+      return data.secure_url;
+    } catch (error) {
+      console.error('Cloudinary upload error:', error);
+      throw new Error('Failed to upload image. Please try again.');
+    }
+  };
 
   // Generate 6-digit invite code
   const generateInviteCode = () => {
@@ -31,9 +64,7 @@ export function useGroups() {
       let coverPhotoURL = '';
 
       if (coverImage) {
-        const storageRef = ref(storage, `groups/${Date.now()}/cover/${coverImage.name}`);
-        await uploadBytes(storageRef, coverImage);
-        coverPhotoURL = await getDownloadURL(storageRef);
+        coverPhotoURL = await uploadToCloudinary(coverImage);
       }
 
       const group = {
@@ -57,7 +88,6 @@ export function useGroups() {
     }
   };
 
-  // Join group via invite code
   const joinGroupByCode = async (inviteCode, userId) => {
     setLoading(true);
     setError(null);
@@ -77,12 +107,10 @@ export function useGroups() {
       const groupDoc = snapshot.docs[0];
       const groupData = groupDoc.data();
 
-      // Check if user is already a member
       if (groupData.members.some((m) => m.userId === userId)) {
         throw new Error('You are already a member of this group');
       }
 
-      // Add user to members
       const updatedMembers = [
         ...groupData.members,
         { userId, role: 'member', joinedAt: new Date() },
@@ -101,7 +129,6 @@ export function useGroups() {
     }
   };
 
-  // Send group invitation
   const inviteToGroup = async (groupId, fromUserId, toUserId) => {
     setLoading(true);
     setError(null);
@@ -124,7 +151,6 @@ export function useGroups() {
     }
   };
 
-  // Accept group invitation
   const acceptGroupInvitation = async (invitationId, groupId, userId) => {
     setLoading(true);
     setError(null);
@@ -154,7 +180,6 @@ export function useGroups() {
     }
   };
 
-  // Reject group invitation
   const rejectGroupInvitation = async (invitationId) => {
     setLoading(true);
     setError(null);
@@ -171,7 +196,6 @@ export function useGroups() {
     }
   };
 
-  // Leave group
   const leaveGroup = async (groupId, userId) => {
     setLoading(true);
     setError(null);
@@ -194,7 +218,6 @@ export function useGroups() {
     }
   };
 
-  // Delete group (admin only)
   const deleteGroup = async (groupId) => {
     setLoading(true);
     setError(null);
@@ -209,7 +232,6 @@ export function useGroups() {
     }
   };
 
-  // Update group settings (admin only)
   const updateGroupSettings = async (groupId, updates) => {
     setLoading(true);
     setError(null);

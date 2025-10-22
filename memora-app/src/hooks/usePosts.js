@@ -12,13 +12,46 @@ import {
   arrayUnion,
   arrayRemove,
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../config/firebase';
+import { db } from '../config/firebase';
 
 export function usePosts(groupId) {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Upload to Cloudinary
+  const uploadToCloudinary = async (file) => {
+    const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+    const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+
+    if (!cloudName || !uploadPreset) {
+      throw new Error('Cloudinary configuration is missing. Please check your .env file.');
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('upload_preset', uploadPreset);
+
+    try {
+      const response = await fetch(
+        `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+        {
+          method: 'POST',
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to upload image to Cloudinary');
+      }
+
+      const data = await response.json();
+      return data.secure_url;
+    } catch (error) {
+      console.error('Cloudinary upload error:', error);
+      throw new Error('Failed to upload image. Please try again.');
+    }
+  };
 
   // Real-time listener for posts
   useEffect(() => {
@@ -62,14 +95,9 @@ export function usePosts(groupId) {
     try {
       const imageUrls = [];
 
-      // Upload images to Firebase Storage
+      // Upload images to Cloudinary
       for (const image of images) {
-        const storageRef = ref(
-          storage,
-          `posts/${Date.now()}/${image.name}`
-        );
-        await uploadBytes(storageRef, image);
-        const url = await getDownloadURL(storageRef);
+        const url = await uploadToCloudinary(image);
         imageUrls.push(url);
       }
 
@@ -81,6 +109,7 @@ export function usePosts(groupId) {
         images: imageUrls,
         poll: postData.poll || null,
         reactions: {},
+        comments: [],
         tags: postData.tags || [],
         taggedUsers: postData.taggedUsers || [],
         location: postData.location || '',
@@ -137,14 +166,21 @@ export function usePosts(groupId) {
     setError(null);
 
     try {
-      const comment = {
-        postId,
+      const postRef = doc(db, 'posts', postId);
+      const post = posts.find((p) => p.id === postId);
+
+      if (!post) return;
+
+      const newComment = {
+        id: Date.now().toString(),
         authorId: userId,
         text,
         createdAt: new Date(),
       };
 
-      await addDoc(collection(db, 'comments'), comment);
+      const updatedComments = [...(post.comments || []), newComment];
+
+      await updateDoc(postRef, { comments: updatedComments });
     } catch (err) {
       setError(err.message);
       throw err;
